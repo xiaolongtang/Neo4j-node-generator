@@ -104,7 +104,9 @@ public class EntityGenerator {
         code.append("package ").append(BASE_PACKAGE).append(";\n");
         code.append("import lombok.Data;\n");
         code.append("import org.springframework.data.neo4j.core.schema.Id;\n");
-        code.append("import org.springframework.data.neo4j.core.schema.Node;\n\n");
+        code.append("import org.springframework.data.neo4j.core.schema.Node;\n");
+        code.append("import org.springframework.data.neo4j.core.schema.Relationship;\n");
+        code.append("import java.util.Set;\n\n");
 
         code.append("@Data\n");
         code.append("@Node").append("(\"").append(className).append("\")\n");
@@ -120,7 +122,40 @@ public class EntityGenerator {
                 .append(";\n");
         }
 
-        code.append("}\n");
+        // Add relationships
+        try (Session session = driver.session()) {
+            Result result = session.run(
+                "MATCH (n:"+className+")-[r]->(m) " +
+                "RETURN DISTINCT type(r) as type, labels(m)[0] as targetLabel");
+            while (result.hasNext()) {
+                var record = result.next();
+                String relType = record.get("type").asString();
+                String targetLabel = record.get("targetLabel").asString();
+                String targetClass = formatClassName(targetLabel);
+                
+                code.append("\n    @Relationship(type = \"").append(relType)
+                    .append("\", direction = Relationship.Direction.OUTGOING)\n");
+                code.append("    private Set<").append(targetClass).append("> ")
+                    .append(formatPropertyName(relType)).append(";");
+            }
+
+            result = session.run(
+                "MATCH (n:"+className+")<-[r]-(m) " +
+                "RETURN DISTINCT type(r) as type, labels(m)[0] as sourceLabel");
+            while (result.hasNext()) {
+                var record = result.next();
+                String relType = record.get("type").asString();
+                String sourceLabel = record.get("sourceLabel").asString();
+                String sourceClass = formatClassName(sourceLabel);
+                
+                code.append("\n    @Relationship(type = \"").append(relType)
+                    .append("\", direction = Relationship.Direction.INCOMING)\n");
+                code.append("    private Set<").append(sourceClass).append("> ")
+                    .append(formatPropertyName(relType)).append("Incoming;");
+            }
+        }
+
+        code.append("\n}\n");
         return code.toString();
     }
 
